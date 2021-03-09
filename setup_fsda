@@ -1,0 +1,68 @@
+#!/bin/bash
+
+# Give local scripts execution permission.
+chmod +x "$HOME/field_sweep_data_analysis/run_fsda"
+chmod +x "$HOME/field_sweep_data_analysis/update_fsda"
+
+# Create aliases for running scripts from home folder.
+ALIAS_FILE="$HOME/.bash_aliases"
+RUN_ALIAS="alias 'run_fsda'='~/field_sweep_data_analysis/run_fsda'"
+UPDATE_ALIAS="alias 'update_fsda'='~/field_sweep_data_analysis/update_fsda'"
+
+# Check if alias file exists yet.
+if [ -f "$ALIAS_FILE" ];
+then
+  # See if each alias is already there before adding
+  grep -Fq "$RUN_ALIAS" "$ALIAS_FILE"
+  # https://stackoverflow.com/questions/4749330/how-to-test-if-string-exists-in-file-with-bash
+  GREP_RETURN=$? # gets return value of last command executed.
+  if [ ${GREP_RETURN} -ne 0 ];
+  then echo "$RUN_ALIAS" >> "$ALIAS_FILE"
+  fi
+
+  grep -Fq "$UPDATE_ALIAS" "$ALIAS_FILE"
+  GREP_RETURN=$?
+  if [ ${GREP_RETURN} -ne 0 ];
+  then echo "$UPDATE_ALIAS" >> "$ALIAS_FILE"
+  fi
+else
+    echo "$RUN_ALIAS" > "$ALIAS_FILE"
+    echo "$UPDATE_ALIAS" >> "$ALIAS_FILE"
+fi
+
+source "$HOME/.bash_aliases"
+
+# Define path variables
+LOCAL_RAW="$HOME/field_sweep_data_analysis/data_raw"
+LOCAL_BUFFER="$HOME/field_sweep_data_analysis/data_buffer"
+LOCAL_OUT="$HOME/field_sweep_data_analysis/data_out"
+LOCAL_FIG="$HOME/field_sweep_data_analysis/plots"
+
+# Create local folders if they doesn't exist already
+if [ -d "$LOCAL_RAW" ];
+then
+	: # do nothing
+else
+	mkdir "$LOCAL_RAW"
+fi
+
+if [ -d "$LOCAL_BUFFER" ];
+then
+	: # do nothing
+else
+	mkdir "$LOCAL_BUFFER"
+fi
+
+if [ -d "$LOCAL_OUT" ];
+then
+	: # do nothing
+else
+	mkdir "$LOCAL_OUT"
+fi
+
+if [ -d "$LOCAL_FIG" ];
+then
+	: # do nothing
+else
+	mkdir "$LOCAL_FIG"
+fi

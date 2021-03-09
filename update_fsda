@@ -1,0 +1,15 @@
+#!/bin/bash
+
+printf "\nNavigate to Github.com with browser. Click through firewall. Press Enter when finished.\n"
+read # Require user input
+
+# Update git project.
+cd ~/field_sweep_data_analysis
+git pull
+GIT_RETURN=$? # gets return value of last command executed.
+if [ ${GIT_RETURN} -ne 0 ]
+then
+  printf "\nFailed to update. Make sure you open Github.com when asked.\n"
+	exit 1
+fi
+cd - >> /dev/null # go back to original directory w/ no output
