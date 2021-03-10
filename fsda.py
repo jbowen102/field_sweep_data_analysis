@@ -1,11 +1,15 @@
 print("Importing modules...")
-import argparse     # Used to parse optional command-line arguments
-import getpass
 import os           # Used for analyzing file paths and directories
 import csv          # Needed to read in and write out data
+import argparse     # Used to parse optional command-line arguments
 import pandas as pd # Series and DataFrame structures
 import traceback
+import time
 from datetime import datetime
+import getpass
+from PIL import Image
+import hashlib
+import glob
 
 try:
     import matplotlib
@@ -16,6 +20,8 @@ try:
 except ImportError:
     PLOT_LIB_PRESENT = False
 # https://stackoverflow.com/questions/3496592/conditional-import-of-modules-in-python
+
+import wpfix as wp
 print("...done\n")
 
 # global constants: directory structure
@@ -56,39 +62,62 @@ class DataReadError(Exception):
     pass
 
 
-class RunGroup(object):
-    """Represents a collection of runs from the data_raw directory."""
-    def __init__(self, process_all=False, start_run=False, verbose=False, warn=False):
-        self.verbosity = verbose
-        self.warn_p = warn
-        # create SingleRun object for each run but don't read in data yet.
-        # self.build_run_dict()
-        # self.process_runs(process_all, start_run)
-
 
 class SingleRun(object):
     """Represents a single run from the raw_data directory.
     No data is read in until read_data() method called.
     """
-    def __init__(self, input_path, verbose=False, warn_prompt=False):
+    def __init__(self, verbose=False, warn_prompt=False):
         # Create a new object to store and print output info
         self.Doc = Output(verbose, warn_prompt)
-        self.input_path = input_path
+
+        self.input_path = self.prompt_for_run()
         # self.parse_run_num()
+        self.run_label = "TEST" # TEMP
 
         # Docmument in metadata string to include in output file
         self.meta_str = "Input file: '%s' | " % self.input_path
 
-    def parse_run_num(self):
-        pass
+        try:
+            self.process_data()
+        except Exception:
+            self.log_exception("Processing")
+
+
+    def prompt_for_run(self):
+        """Prompts user for what run to process
+        Returns SingleRun object."""
+
+        input_str = input("Enter run path\n> ")
+        # Need it to be long enough for wpfix not to raise exception.
+        while len(input_str) < 2:
+            input_str = input("Invalid path entered.\n\t%s\n"
+                                    "Enter valid run path\n> " % input_str)
+
+        # Convert Windows path to UNIX format if needed.
+        target_path = wp.wpfix(input_str)
+        while not os.path.isfile(target_path):
+            target_path = input("Invalid path entered.\n\t%s\n"
+                                    "Enter valid run path\n> " % target_path)
+
+        return target_path
+
+        # run_prompt = "Enter run num (four digits)\n> "
+        # target_run_num = input(run_prompt)
+
+        # while not self.validate_run_num(target_run_num):
+        #     target_run_num = input(run_prompt)
+        # return self.run_dict.get(target_run_num)
+
+    def get_run_label(self):
+        return self.run_label
+        # not sure if these runs will have simple labels
+        # was being extracted by self.parse_run_num()
 
     def process_data(self):
         """Apply all processing methods to this run."""
         self.read_data()
-        # if int(self.run_label[:2]) > 5:
-        #     # only needed for torque-meter runs.
-        #     self.combine_torque()
-        #     self.calc_gnd_speed()
+
         # self.abridge_data()
         # self.add_math_channels()
 
@@ -100,6 +129,7 @@ class SingleRun(object):
             data_in = csv.reader(input_ascii_file, delimiter="\t")
             # https://stackoverflow.com/questions/7856296/parsing-csv-tab-delimited-txt-file-with-python
 
+            raw_data_dict = {}
             for i, input_row in enumerate(data_in):
                 if i == 2:
                     # print channels for debugging
@@ -107,7 +137,6 @@ class SingleRun(object):
                                 "  -  ".join([str(c) for c in input_row]), True)
 
                     # index channels in dict for future reference.
-                    raw_data_dict = {}
                     self.channel_dict = {}
                     for pos, channel in enumerate(input_row):
                         self.channel_dict[pos] = channel
@@ -118,6 +147,8 @@ class SingleRun(object):
                     # ignore headers
                     continue
                 else:
+                    self.Doc.print("Row:\t" +
+                                "  -  ".join([str(c) for c in input_row]), True)
                     for n, value_str in enumerate(input_row):
                         channel = self.channel_dict[n]
                         raw_data_dict[channel].append(float(value_str))
@@ -133,10 +164,64 @@ class SingleRun(object):
                                                 show_dimensions=True), True)
         self.Doc.print("", True)
 
-    def get_run_label(self):
-        return self.run_label
-        # not sure if these runs will have simple labels
-        # was being extracted by self.parse_run_num()
+
+    def plot_data(self, overwrite=False, description=""):
+        """Plot various raw and calculated data from run."""
+        self.overwrite = overwrite
+        self.description = description
+        self.Doc.print("") # blank line
+
+        # each of these calls export_plot() and clears fig afterward.
+        # self.plot_abridge_compare()
+        # self.plot_cvt_ratio()
+
+    def export_plot(self, type):
+        """Exports plot that's already been created with another method.
+        Assumes caller method will clear figure afterward."""
+        if self.description:
+            fig_filepath = ("%s/%s_%s-%s.png"
+                        % (PLOT_DIR, self.run_label, type, self.description))
+        else:
+            fig_filepath = "%s/%s_%s.png" % (PLOT_DIR, self.run_label, type)
+
+        short_hash_len = 6
+        # Check for existing fig with same filename including description but
+        # EXCLUDING hash.
+        wildcard_filename = (os.path.splitext(fig_filepath)[0]
+                            + "-#" + "?"*short_hash_len
+                            + os.path.splitext(fig_filepath)[1])
+        if glob.glob(wildcard_filename) and not self.overwrite:
+            ow_answer = ""
+            while ow_answer.lower() not in ["y", "n"]:
+                self.Doc.print("\n%s already exists in figs folder. Overwrite? (Y/N)"
+                                        % os.path.basename(wildcard_filename))
+                ow_answer = input("> ")
+            if ow_answer.lower() == "y":
+                for filepath in glob.glob(wildcard_filename):
+                    os.remove(filepath)
+                # continue with rest of function
+            elif ow_answer.lower() == "n":
+                # plot will be cleared in caller function.
+                return
+        elif glob.glob(wildcard_filename) and self.overwrite:
+            for filepath in glob.glob(wildcard_filename):
+                os.remove(filepath)
+                # Must manually remove because if figure hash changes, it will
+                # not overwrite original.
+
+        plt.savefig(fig_filepath)
+        # Calculate unique hash value (like a fingerprint) to output in CSV's
+        # meta_str. Put in img filename too.
+        img_hash = hashlib.sha1(Image.open(fig_filepath).tobytes())
+        # https://stackoverflow.com/questions/24126596/print-md5-hash-of-an-image-opened-with-pythons-pil
+        hash_text = img_hash.hexdigest()[:short_hash_len]
+        fig_filepath_hash = (os.path.splitext(fig_filepath)[0] + "-#"
+                                + hash_text + os.path.splitext(fig_filepath)[1])
+        os.rename(fig_filepath, fig_filepath_hash)
+        self.Doc.print("Exported plot as %s." % fig_filepath_hash)
+        self.meta_str += ("Corresponding %s fig hash: '%s' | "
+                                                            % (type, hash_text))
+
 
     def log_exception(self, operation):
         """Write output file for later debugging upon encountering exception."""
@@ -155,10 +240,20 @@ class SingleRun(object):
         with open(full_path, "w") as log_file:
             log_file.write(self.get_output().get_log_dump())
 
-        input("\n%s failed on run %s.\nOutput and exception "
-            "trace written to '%s'.\nPress Enter to skip this run."
+        print("\n%s failed on run %s.\nOutput and exception "
+            "trace written to '%s'."
                                 % (operation, self.get_run_label(), full_path))
         print("") # blank line
+
+    def get_output(self):
+        return self.Doc
+
+    def __str__(self):
+        return self.run_label
+
+    def __repr__(self):
+        return ("SingleRun object for run %s" % self.run_label)
+
 
 
 class Output(object):
@@ -205,8 +300,6 @@ def main_prog():
     # this interprets them.
     parser = argparse.ArgumentParser(description="Program to analyze field "
                                                                 "sweep data.")
-    parser.add_argument("-a", "--auto", help="Automatically process all data "
-                                    "in data_raw folder.", action="store_true")
     parser.add_argument("-o", "--over", help="Overwrite existing data in "
                     "data_out folder without prompting.", action="store_true")
     parser.add_argument("-p", "--plot", help="Product plots.",
@@ -222,8 +315,6 @@ def main_prog():
                                                     type=str, default=LOG_DIR)
     parser.add_argument("-i", "--ignore-warn", help="Do not prompt user to "
                                 "acknowledge warnings.", action="store_false")
-    parser.add_argument("-s", "--start", help="Specify run number to start "
-        "with when processing all runs (-a option).", type=str, default=False)
     # https://www.programcreek.com/python/example/748/argparse.ArgumentParser
     args = parser.parse_args()
 
@@ -232,22 +323,22 @@ def main_prog():
     else:
         raise FilenameError("Bad log-dir argument. Must be valid path. "
                                                                     "Aborting.")
+    # test
+    MyRun = SingleRun(args.verbose, args.ignore_warn)
 
-    AllRuns = RunGroup(args.auto, args.start, args.verbose, args.ignore_warn)
-
-    if args.plot and PLOT_LIB_PRESENT:
-        if not os.path.exists(PLOT_DIR):
-            # Create folder for output plots if it doesn't exist already.
-            os.mkdir(PLOT_DIR)
-        AllRuns.plot_runs(args.over, args.desc)
-    elif args.plot:
-        print("\nFailed to import matplotlib. Cannot plot data.")
-
-    if not os.path.exists(OUTPUT_DIR):
-        # Create folder for output data if it doesn't exist already.
-        os.mkdir(OUTPUT_DIR)
-
-    AllRuns.export_runs(args.over, args.desc)
+    # if args.plot and PLOT_LIB_PRESENT:
+    #     if not os.path.exists(PLOT_DIR):
+    #         # Create folder for output plots if it doesn't exist already.
+    #         os.mkdir(PLOT_DIR)
+    #     MyRun.plot_data(args.over, args.desc)
+    # elif args.plot:
+    #     print("\nFailed to import matplotlib. Cannot plot data.")
+    #
+    # if not os.path.exists(OUTPUT_DIR):
+    #     # Create folder for output data if it doesn't exist already.
+    #     os.mkdir(OUTPUT_DIR)
+    #
+    # MyRun.export_data(args.over, args.desc)
 
 
 if __name__ == "__main__":
