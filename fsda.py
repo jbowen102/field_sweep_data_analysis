@@ -101,8 +101,8 @@ class SingleRun(object):
         # Convert Windows path to UNIX format if needed.
         target_path = wp.wpfix(input_str)
         while not os.path.isfile(target_path):
-            target_path = input("Invalid path entered.\n\t%s\n"
-                                    "Enter valid run path\n> " % target_path)
+            target_path = wp.wpfix(input("Invalid path entered.\n\t%s\n"
+                                    "Enter valid run path\n> " % target_path))
 
         return target_path
 
@@ -147,6 +147,17 @@ class SingleRun(object):
                         # Set up empty lists for each entry in raw_data_dict.
                         raw_data_dict[channel] = []
                     continue
+                elif i == 4:
+                    # print units for debugging
+                    self.Doc.print("\tInput file units:\t" +
+                                "  -  ".join([str(c) for c in input_row]), True)
+
+                    # index units in dict for future reference.
+                    self.units_dict = {}
+                    for pos, units in enumerate(input_row):
+                        channel = self.channel_dict[pos]
+                        self.units_dict[channel] = units
+                    continue
                 elif i < HEADER_HT:
                     # ignore headers
                     continue
@@ -172,6 +183,10 @@ class SingleRun(object):
         self.Doc.print("\nraw_df after reading in data:", True)
         self.Doc.print(self.raw_df.to_string(max_rows=10, max_cols=7,
                                                 show_dimensions=True), True)
+
+        ## validate that channels we care about are in there.
+
+
         self.Doc.print("", True)
 
 
@@ -336,18 +351,18 @@ def main_prog():
     # test
     MyRun = SingleRun(args.verbose, args.ignore_warn)
 
-    # if args.plot and PLOT_LIB_PRESENT:
-    #     if not os.path.exists(PLOT_DIR):
-    #         # Create folder for output plots if it doesn't exist already.
-    #         os.mkdir(PLOT_DIR)
-    #     MyRun.plot_data(args.over, args.desc)
-    # elif args.plot:
-    #     print("\nFailed to import matplotlib. Cannot plot data.")
-    #
-    # if not os.path.exists(OUTPUT_DIR):
-    #     # Create folder for output data if it doesn't exist already.
-    #     os.mkdir(OUTPUT_DIR)
-    #
+    if args.plot and PLOT_LIB_PRESENT:
+        if not os.path.exists(PLOT_DIR):
+            # Create folder for output plots if it doesn't exist already.
+            os.mkdir(PLOT_DIR)
+        MyRun.plot_data(args.over, args.desc)
+    elif args.plot:
+        print("\nFailed to import matplotlib. Cannot plot data.")
+
+    if not os.path.exists(OUTPUT_DIR):
+        # Create folder for output data if it doesn't exist already.
+        os.mkdir(OUTPUT_DIR)
+
     # MyRun.export_data(args.over, args.desc)
 
 
