@@ -3,6 +3,7 @@ import os           # Used for analyzing file paths and directories
 import csv          # Needed to read in and write out data
 import argparse     # Used to parse optional command-line arguments
 import pandas as pd # Series and DataFrame structures
+import numpy as np
 import traceback
 import time
 from datetime import datetime
@@ -35,7 +36,10 @@ username = getpass.getuser()
 # https://stackoverflow.com/questions/842059/is-there-a-portable-way-to-get-the-current-username-in-python
 home_contents = os.listdir("/mnt/c/Users/%s" % username)
 onedrive = [folder for folder in home_contents if "OneDrive -" in folder][0]
-LOG_DIR = "/mnt/c/Users/%s/%s/Desktop" % (username, onedrive)
+desktop_path = "/mnt/c/Users/%s/%s/Desktop" % (username, onedrive)
+LOG_DIR = os.path.join(desktop_path, "fsda_errors")
+if not os.path.isdir(LOG_DIR):
+    os.mkdir(LOG_DIR)
 
 HEADER_HT = 5 # how many non-data rows at top of raw file.
 # KEY_CHANNELS = [
@@ -147,11 +151,17 @@ class SingleRun(object):
                     # ignore headers
                     continue
                 else:
-                    self.Doc.print("Row:\t" +
-                                "  -  ".join([str(c) for c in input_row]), True)
+                    # self.Doc.print("Data Row %d:\t" % (i-HEADER_HT) +
+                    #             "  -  ".join([str(c) for c in input_row]), True)
                     for n, value_str in enumerate(input_row):
                         channel = self.channel_dict[n]
-                        raw_data_dict[channel].append(float(value_str))
+                        try:
+                            raw_data_dict[channel].append(float(value_str))
+                        except ValueError:
+                            # blanks or any other non-data string
+                            raw_data_dict[channel].append(np.nan)
+        # for key in raw_data_dict:
+        #     print("%s: %d" % (key, len(raw_data_dict[key])))
 
         # Convert the dict to a pandas DataFrame for easier manipulation
         # and analysis.
@@ -311,7 +321,7 @@ def main_prog():
                                             "specified.", type=str, default="")
     parser.add_argument("-l", "--log-dir", help="Specify a directory where log "
         "file containing that run's output and error trace should be saved "
-                    "when error encountered. Desktop used when unspecified.",
+                    "when error encountered. Desktop/fsda_errors is default.",
                                                     type=str, default=LOG_DIR)
     parser.add_argument("-i", "--ignore-warn", help="Do not prompt user to "
                                 "acknowledge warnings.", action="store_false")
