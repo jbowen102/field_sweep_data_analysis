@@ -11,6 +11,7 @@ import getpass
 from PIL import Image
 import hashlib
 import glob
+from tqdm import tqdm
 
 try:
     import matplotlib
@@ -139,9 +140,7 @@ class SingleRun(object):
     def process_data(self):
         """Apply all processing methods to this run."""
         self.read_data()
-
-        # self.abridge_data()
-        # self.add_math_channels()
+        self.add_math_channels()
 
     def read_data(self):
         """Read in run's data from data_raw directory."""
@@ -207,6 +206,118 @@ class SingleRun(object):
 
 
         self.Doc.print("", True)
+
+
+    def add_math_channels(self):
+        """Run calculations on data and store in new dataframe."""
+        self.math_df = pd.DataFrame(index=self.raw_df.index)
+        # https://stackoverflow.com/questions/18176933/create-an-empty-data-frame-with-index-from-another-data-frame
+
+        self.add_ss_avgs()
+
+
+    def add_ss_avgs(self):
+        """Identify steady-state regions of data and calculate average vals."""
+        win_size_avg = 51  # window size for speed rolling avg.
+        win_size_slope = 301 # win size for rolling slope of speed rolling avg.
+
+        es_slope_cr = 100  # rpm/s.
+        # Engine-speed slope (max) criterion to est. steady-state. Abs value
+
+        egt_slope_cr = 0.25  # degrees Celsius per second.
+        # EGT slope (max) criterion to est. steady-state. Abs value
+
+        # Document in metadata string for output file:
+        self.meta_str += ("Steady-state calc criteria: "
+                          "eng speed slope magnitude less than %s rpm/s, "
+                          "EGT slope magnitude less than %s degrees(C)/s | "
+                                                % (es_slope_cr, egt_slope_cr))
+        self.meta_str += ("Steady-state calc rolling window sizes: "
+                                                "%d for avg, %d for slope | "
+                                            % (win_size_avg, win_size_slope))
+
+        # Create rolling average and rolling (regression) slope of rolling avg
+        # for engine speed.
+        self.math_df["es_rolling_avg"] = self.raw_df.rolling(
+                        window=win_size_avg, center=True)["Engine_RPM"].mean()
+
+        # Create and register a new tqdm instance with pandas.
+        # Have to manually feed it the total iteration count.
+        tqdm.pandas(total=len(self.raw_df.index)-(win_size_avg-1)-(win_size_slope-1))
+        # https://stackoverflow.com/questions/48935907/tqdm-not-showing-bar
+        self.Doc.print("Calculating rolling regression on engine speed data...")
+        self.math_df["es_rolling_slope"] = self.math_df["es_rolling_avg"].rolling(
+                window=win_size_slope, center=True).progress_apply(
+                                        lambda x: np.polyfit(x.index, x, 1)[0])
+        self.Doc.print("...done")
+
+        # Create rolling average and rolling (regression) slope of rolling avg
+        # for EGT.
+        self.math_df["egt_rolling_avg"] = self.raw_df.rolling(
+               window=win_size_avg, center=True)["Exhaust_Temperature"].mean()
+        # https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.DataFrame.rolling.html
+
+        tqdm.pandas(total=len(self.raw_df.index)-(win_size_avg-1)-(win_size_slope-1))
+        # https://stackoverflow.com/questions/48935907/tqdm-not-showing-bar
+        self.Doc.print("\nCalculating rolling regression on EGT data...")
+        self.math_df["egt_rolling_slope"] = self.math_df["egt_rolling_avg"].rolling(
+                window=win_size_slope, center=True).progress_apply(
+                                        lambda x: np.polyfit(x.index, x, 1)[0])
+        # https://stackoverflow.com/questions/18603270/progress-indicator-during-pandas-operations
+        self.Doc.print("...done")
+
+        # Apply speed and speed slope criteria to isolate steady-state events.
+        ss_filter = (      (self.math_df["es_rolling_slope"] < es_slope_cr)
+                         & (self.math_df["es_rolling_slope"] > -es_slope_cr)
+                         & (self.math_df["egt_rolling_slope"] < egt_slope_cr)
+                         & (self.math_df["egt_rolling_slope"] > -egt_slope_cr) )
+        # egt_slope_cr and es_slope_cr are abs value so have to apply on high
+        # and low end.
+        self.Doc.print("\nTotal data points that fail steady-state criteria: %d"
+                                                        % sum(~ss_filter), True)
+        self.Doc.print("Total data points that meet steady-state criteria: %d"
+                                                         % sum(ss_filter), True)
+        # https://stackoverflow.com/questions/12765833/counting-the-number-of-true-booleans-in-a-python-list
+
+        self.math_df["steady_state"] = ss_filter
+
+        # "Mask off" by assigning NaN where criteria not met.
+        self.math_df["egt_rol_avg_mskd"] = self.math_df["egt_rolling_avg"].mask(
+                                                                    ~ss_filter)
+        self.math_df["es_rol_avg_mskd"] = self.math_df["es_rolling_avg"].mask(
+                                                                    ~ss_filter)
+        # Masking these too to calculate avg slope off SS region later:
+        self.math_df["egt_rslope_mskd"] = self.math_df["egt_rolling_slope"].mask(
+                                                                    ~ss_filter)
+        self.math_df["es_rslope_mskd"] = self.math_df["es_rolling_slope"].mask(
+                                                                    ~ss_filter)
+        # https://pandas.pydata.org/pandas-docs/stable/user_guide/indexing.html#indexing-where-mask
+
+        # Calculate overall (aggregate) mean of each filtered/masked channel.
+        # Prefill with NaN and assign mean to first element.
+        self.math_df["SS_egt_avg"] = np.nan
+        self.math_df.at[0, "SS_egt_avg"] = np.mean(
+                                                self.math_df["egt_rol_avg_mskd"])
+        self.math_df["SS_eng_spd_avg"] = np.nan
+        self.math_df.at[0, "SS_eng_spd_avg"] = np.mean(
+                                                self.math_df["es_rol_avg_mskd"])
+        # https://stackoverflow.com/questions/13842088/set-value-for-particular-cell-in-pandas-dataframe-using-index
+        # https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.DataFrame.at.html
+
+        # pandas rolling(), apply(), regression references:
+        # https://stackoverflow.com/questions/47390467/pandas-dataframe-rolling-with-two-columns-and-two-rows
+        # https://pandas.pydata.org/pandas-docs/version/0.23.4/whatsnew.html#rolling-expanding-apply-accepts-raw-false-to-pass-a-series-to-the-function
+        # https://stackoverflow.com/questions/49100471/how-to-get-slopes-of-data-in-pandas-dataframe-in-python
+        # https://www.pythonprogramming.net/rolling-apply-mapping-functions-data-analysis-python-pandas-tutorial/
+        # https://stackoverflow.com/questions/21025821/python-custom-function-using-rolling-apply-for-pandas
+        # http://greg-ashton.physics.monash.edu/applying-python-functions-in-moving-windows.html
+        # https://stackoverflow.com/questions/50482884/module-pandas-has-no-attribute-rolling-mean
+        # https://stackoverflow.com/questions/45254174/how-do-pandas-rolling-objects-work
+        # https://pandas.pydata.org/pandas-docs/stable/user_guide/computation.html
+        # https://becominghuman.ai/linear-regression-in-python-with-pandas-scikit-learn-72574a2ec1a5
+        # https://medium.com/the-code-monster/split-a-dataset-into-train-and-test-datasets-using-sk-learn-acc7fd1802e0
+        # https://towardsdatascience.com/regression-plots-with-pandas-and-numpy-faf2edbfad4f
+        # https://data36.com/linear-regression-in-python-numpy-polyfit/
 
 
     def plot_data(self, overwrite=False, description=""):
@@ -327,6 +438,7 @@ class SingleRun(object):
             "trace written to '%s'."
                                 % (operation, self.get_run_label(), full_path))
         print("") # blank line
+        quit()
 
     def get_output(self):
         return self.Doc
