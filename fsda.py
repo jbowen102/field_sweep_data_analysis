@@ -2,6 +2,13 @@ print("Importing modules...")
 import os           # Used for analyzing file paths and directories
 import csv          # Needed to read in and write out data
 import argparse     # Used to parse optional command-line arguments
+import warnings
+warnings.simplefilter(action='ignore', category=FutureWarning)
+# https://stackoverflow.com/questions/15777951/how-to-suppress-pandas-future-warning
+# https://stackoverflow.com/questions/18603270/progress-indicator-during-pandas-operations
+# https://pypi.org/project/tqdm/#pandas-integration
+# Gives warning if tqdm version <4.33.0. Ignore.
+# https://github.com/tqdm/tqdm/issues/780
 import pandas as pd # Series and DataFrame structures
 import numpy as np
 import traceback
@@ -293,17 +300,6 @@ class SingleRun(object):
                                                                     ~ss_filter)
         # https://pandas.pydata.org/pandas-docs/stable/user_guide/indexing.html#indexing-where-mask
 
-        # Calculate overall (aggregate) mean of each filtered/masked channel.
-        # Prefill with NaN and assign mean to first element.
-        self.math_df["SS_egt_avg"] = np.nan
-        self.math_df.at[0, "SS_egt_avg"] = np.mean(
-                                                self.math_df["egt_rol_avg_mskd"])
-        self.math_df["SS_eng_spd_avg"] = np.nan
-        self.math_df.at[0, "SS_eng_spd_avg"] = np.mean(
-                                                self.math_df["es_rol_avg_mskd"])
-        # https://stackoverflow.com/questions/13842088/set-value-for-particular-cell-in-pandas-dataframe-using-index
-        # https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.DataFrame.at.html
-
         # pandas rolling(), apply(), regression references:
         # https://stackoverflow.com/questions/47390467/pandas-dataframe-rolling-with-two-columns-and-two-rows
         # https://pandas.pydata.org/pandas-docs/version/0.23.4/whatsnew.html#rolling-expanding-apply-accepts-raw-false-to-pass-a-series-to-the-function
@@ -327,9 +323,9 @@ class SingleRun(object):
         self.Doc.print("") # blank line
 
         self.plot_raw_basic()
+        self.plot_ss_range()
+
         # each of these calls export_plot() and clears fig afterward.
-        # self.plot_abridge_compare()
-        # self.plot_cvt_ratio()
 
     def plot_raw_basic(self):
         """Creates a plot showing raw engine speed and throttle opening."""
@@ -365,6 +361,67 @@ class SingleRun(object):
         # plt.show() # can't use w/ WSL.
         # https://stackoverflow.com/questions/43397162/show-matplotlib-plots-and-other-gui-in-ubuntu-wsl1-wsl2
         self.export_plot("raw_basic")
+        plt.clf()
+        # https://stackoverflow.com/questions/8213522/when-to-use-cla-clf-or-close-for-clearing-a-plot-in-matplotlib
+
+
+    def plot_ss_range(self):
+        """Creates a plot showing highlighted steady-state regions and the data
+        used to identify them."""
+        # ax1 = plt.subplot(311)
+        ax1 = plt.subplot(211)
+
+        plt.plot(self.raw_df.index, self.raw_df["Engine_RPM"],
+                                    label="Engine Speed", color="yellowgreen")
+
+        plt.plot(self.raw_df.index, self.math_df["es_rolling_avg"],
+                                        label="Rolling Avg", color="tab:orange")
+        plt.plot(self.raw_df.index, self.math_df["es_rol_avg_mskd"],
+                                        label="Steady-state", color="tab:blue")
+
+        plt.ylabel("Engine Speed (rpm)")
+
+        plt.title("Run %s - Steady-state Isolation (Abridged Data)"
+                                                % self.run_label, loc="left")
+
+        plt.setp(ax1.get_xticklabels(), visible=False)
+
+        # ax2 = plt.subplot(312, sharex=ax1)
+        ax2 = plt.subplot(212, sharex=ax1)
+        plt.plot(self.raw_df.index, self.raw_df["Exhaust_Temperature"],
+                                                label="Exhaust Temp", color="k")
+        plt.plot(self.raw_df.index, self.math_df["egt_rolling_avg"],
+                                                label="Rolling Avg", color="c")
+        plt.plot(self.raw_df.index, self.math_df["egt_rol_avg_mskd"],
+                                                label="Steady-state", color="r")
+        plt.ylabel("EGT (C)")
+        ax2.set_xlabel("Time (s)")
+
+        # plt.setp(ax2.get_xticklabels(), visible=False)
+
+        # ax3 = plt.subplot(313, sharex=ax1)
+        # color = "tab:purple"
+        # # Convert DF indices from hundredths of a second to seconds
+        # plt.plot(self.raw_df.index, self.raw_df["throttle"],
+        #                                     label="Throttle", color=color)
+        # ax3.set_ylim([-25, 100]) # Shift throttle trace up
+        # ax3.set_yticks([0, 20, 40, 60, 80, 100])
+        # ax3.set_xlabel("Time (s)")
+        # ax3.set_ylabel("Throttle (deg)", color=color)
+        # ax3.tick_params(axis="y", labelcolor=color)
+        #
+        # ax3_twin = ax3.twinx() # second plot on same x axis
+        # # https://matplotlib.org/gallery/api/two_scales.html
+        # color = "tab:red"
+        # ax3_twin.plot(self.raw_df.index, self.raw_df["pedal_sw"], color=color)
+        # ax3_twin.set_ylim([-.25, 8]) # scale down pedal switch
+        # ax3_twin.set_yticks([0, 1])
+        # ax3_twin.set_ylabel("Pedal Switch", color=color)
+        # ax3_twin.tick_params(axis="y", labelcolor=color)
+
+        # plt.show() # can't use w/ WSL.
+        # https://stackoverflow.com/questions/43397162/show-matplotlib-plots-and-other-gui-in-ubuntu-wsl1-wsl2
+        self.export_plot("ss")
         plt.clf()
         # https://stackoverflow.com/questions/8213522/when-to-use-cla-clf-or-close-for-clearing-a-plot-in-matplotlib
 
