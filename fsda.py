@@ -62,6 +62,9 @@ HEADER_HT = 5 # how many non-data rows at top of raw file.
 class FilenameError(Exception):
     pass
 
+class FileLocError(Exception):
+    pass
+
 class DataReadError(Exception):
     pass
 
@@ -71,11 +74,15 @@ class SingleRun(object):
     """Represents a single run from the raw_data directory.
     No data is read in until read_data() method called.
     """
-    def __init__(self, verbose=False, warn_prompt=False):
+    def __init__(self, auto_find=False, verbose=False, warn_prompt=False):
         # Create a new object to store and print output info
         self.Doc = Output(verbose, warn_prompt)
 
-        self.input_path = self.prompt_for_run()
+        if auto_find:
+            self.input_path = self.find_run()
+        else:
+            self.input_path = self.prompt_for_run()
+
         # self.parse_run_num()
         self.run_label = "TEST" # TEMP
 
@@ -86,6 +93,17 @@ class SingleRun(object):
             self.process_data()
         except Exception:
             self.log_exception("Processing")
+
+
+    def find_run(self):
+        raw_dir_contents = os.listdir(RAW_DATA_DIR)
+        if len(raw_dir_contents) > 1:
+            raise FileLocError("More than one file found in data_raw folder.")
+        if (len(raw_dir_contents) < 1 or
+           not os.path.isfile(os.path.join(RAW_DATA_DIR, raw_dir_contents[0]))):
+            raise FileLocError("No file found in data_raw folder.")
+        else:
+            return os.path.join(RAW_DATA_DIR, raw_dir_contents[0])
 
 
     def prompt_for_run(self):
@@ -367,6 +385,8 @@ def main_prog():
                                                                 "sweep data.")
     parser.add_argument("-o", "--over", help="Overwrite existing data in "
                     "data_out folder without prompting.", action="store_true")
+    parser.add_argument("-a", "--auto", help="Automatically process data file "
+                                    "in data_raw folder.", action="store_true")
     parser.add_argument("-p", "--plot", help="Product plots.",
                                                             action="store_true")
     parser.add_argument("-v", "--verbose", help="Include additional output for "
@@ -389,7 +409,7 @@ def main_prog():
         raise FilenameError("Bad log-dir argument. Must be valid path. "
                                                                     "Aborting.")
     # test
-    MyRun = SingleRun(args.verbose, args.ignore_warn)
+    MyRun = SingleRun(args.auto, args.verbose, args.ignore_warn)
 
     if args.plot and PLOT_LIB_PRESENT:
         if not os.path.exists(PLOT_DIR):
