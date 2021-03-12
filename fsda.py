@@ -142,7 +142,8 @@ class SingleRun(object):
 
                     # index channels in dict for future reference.
                     self.channel_dict = {}
-                    for pos, channel in enumerate(input_row):
+                    for pos, channel_str in enumerate(input_row):
+                        channel = channel_str.split("\\")[0]
                         self.channel_dict[pos] = channel
                         # Set up empty lists for each entry in raw_data_dict.
                         raw_data_dict[channel] = []
@@ -196,9 +197,48 @@ class SingleRun(object):
         self.description = description
         self.Doc.print("") # blank line
 
+        self.plot_raw_basic()
         # each of these calls export_plot() and clears fig afterward.
         # self.plot_abridge_compare()
         # self.plot_cvt_ratio()
+
+    def plot_raw_basic(self):
+        """Creates a plot showing raw engine speed and throttle opening."""
+        ax1 = plt.subplot(411)
+        plt.plot(self.raw_df.index, self.raw_df["Engine_RPM"],
+                                        label="Engine Speed", color="tab:blue")
+        plt.title("Run %s - Raw Data" % self.run_label, loc="left")
+        plt.ylabel("Engine Speed (rpm)")
+
+        plt.setp(ax1.get_xticklabels(), visible=False)
+
+        ax2 = plt.subplot(412, sharex=ax1)
+        plt.plot(self.raw_df.index, self.raw_df["Throttle_Position"],
+                                        label="Throttle", color="tab:purple")
+        ax2.set_ylabel("Throttle (deg)")
+
+        plt.setp(ax2.get_xticklabels(), visible=False)
+
+        ax3 = plt.subplot(413, sharex=ax1)
+        plt.plot(self.raw_df.index, self.raw_df["Exhaust_Temperature"],
+                                    label="Exhaust Temp", color="tab:orange")
+        ax3.set_ylabel("Exhaust Temp (C)")
+
+        plt.setp(ax3.get_xticklabels(), visible=False)
+
+        ax4 = plt.subplot(414, sharex=ax1)
+        plt.plot(self.raw_df.index, self.raw_df["Coolant_Temp"],
+                                        label="Coolant Temp", color="tab:blue")
+        ax4.set_ylabel("Coolant Temp (C)")
+
+        ax4.set_xlabel("Time (s)")
+
+        # plt.show() # can't use w/ WSL.
+        # https://stackoverflow.com/questions/43397162/show-matplotlib-plots-and-other-gui-in-ubuntu-wsl1-wsl2
+        self.export_plot("raw_basic")
+        plt.clf()
+        # https://stackoverflow.com/questions/8213522/when-to-use-cla-clf-or-close-for-clearing-a-plot-in-matplotlib
+
 
     def export_plot(self, type):
         """Exports plot that's already been created with another method.
