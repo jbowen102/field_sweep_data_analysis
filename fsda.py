@@ -225,14 +225,18 @@ class SingleRun(object):
 
     def add_ss_avgs(self):
         """Identify steady-state regions of data and calculate average vals."""
-        win_size_avg = 51  # window size for speed rolling avg.
-        win_size_slope = 301 # win size for rolling slope of speed rolling avg.
+        es_win_size_avg = 5001  # window size for engine speed rolling avg.
+        es_win_size_slope = 201 # win size for rolling slope of engine speed rolling avg.
 
-        es_slope_cr = 100  # rpm/s.
+        egt_win_size_avg = 1001  # window size for EGT rolling avg.
+        egt_win_size_slope = 1001 # win size for rolling slope of EGT rolling avg.
+
+        es_slope_cr = 10  # rpm/s.
         # Engine-speed slope (max) criterion to est. steady-state. Abs value
-
-        egt_slope_cr = 0.25  # degrees Celsius per second.
+        egt_slope_cr = 1.5  # degrees Celsius per second.
         # EGT slope (max) criterion to est. steady-state. Abs value
+        time_cr = 2.0 # seconds. Continuous period the criteria must be met to
+                      # keep event.
 
         # Document in metadata string for output file:
         self.meta_str += ("Steady-state calc criteria: "
@@ -240,53 +244,165 @@ class SingleRun(object):
                           "EGT slope magnitude less than %s degrees(C)/s | "
                                                 % (es_slope_cr, egt_slope_cr))
         self.meta_str += ("Steady-state calc rolling window sizes: "
-                                                "%d for avg, %d for slope | "
-                                            % (win_size_avg, win_size_slope))
+                    "%d for engine-speed avg, %d for engine-speed slope | "
+                                        % (es_win_size_avg, es_win_size_slope))
+        self.meta_str += ("Steady-state calc rolling window sizes: "
+                    "%d for EGT avg, %d for EGT slope | "
+                                    % (egt_win_size_avg, egt_win_size_slope))
 
         # Create rolling average and rolling (regression) slope of rolling avg
         # for engine speed.
-        self.math_df["es_rolling_avg"] = self.raw_df.rolling(
-                        window=win_size_avg, center=True)["Engine_RPM"].mean()
+        es_rolling_avg = self.raw_df.rolling(
+                        window=es_win_size_avg, center=True)["Engine_RPM"].mean()
 
         # Create and register a new tqdm instance with pandas.
         # Have to manually feed it the total iteration count.
-        tqdm.pandas(total=len(self.raw_df.index)-(win_size_avg-1)-(win_size_slope-1))
+        tqdm.pandas(total=len(self.raw_df.index)-(es_win_size_avg-1)-(es_win_size_slope-1))
         # https://stackoverflow.com/questions/48935907/tqdm-not-showing-bar
         self.Doc.print("Calculating rolling regression on engine speed data...")
-        self.math_df["es_rolling_slope"] = self.math_df["es_rolling_avg"].rolling(
-                window=win_size_slope, center=True).progress_apply(
+        es_rolling_slope = es_rolling_avg.rolling(
+                window=es_win_size_slope, center=True).progress_apply(
                                         lambda x: np.polyfit(x.index, x, 1)[0])
         self.Doc.print("...done")
 
         # Create rolling average and rolling (regression) slope of rolling avg
         # for EGT.
-        self.math_df["egt_rolling_avg"] = self.raw_df.rolling(
-               window=win_size_avg, center=True)["Exhaust_Temperature"].mean()
+        egt_rolling_avg = self.raw_df.rolling(
+               window=egt_win_size_avg, center=True)["Exhaust_Temperature"].mean()
         # https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.DataFrame.rolling.html
 
-        tqdm.pandas(total=len(self.raw_df.index)-(win_size_avg-1)-(win_size_slope-1))
+        tqdm.pandas(total=len(self.raw_df.index)-(egt_win_size_avg-1)-(egt_win_size_slope-1))
         # https://stackoverflow.com/questions/48935907/tqdm-not-showing-bar
         self.Doc.print("\nCalculating rolling regression on EGT data...")
-        self.math_df["egt_rolling_slope"] = self.math_df["egt_rolling_avg"].rolling(
-                window=win_size_slope, center=True).progress_apply(
+        egt_rolling_slope = egt_rolling_avg.rolling(
+                window=egt_win_size_slope, center=True).progress_apply(
                                         lambda x: np.polyfit(x.index, x, 1)[0])
         # https://stackoverflow.com/questions/18603270/progress-indicator-during-pandas-operations
         self.Doc.print("...done")
 
-        # Apply speed and speed slope criteria to isolate steady-state events.
-        ss_filter = (      (self.math_df["es_rolling_slope"] < es_slope_cr)
-                         & (self.math_df["es_rolling_slope"] > -es_slope_cr)
-                         & (self.math_df["egt_rolling_slope"] < egt_slope_cr)
-                         & (self.math_df["egt_rolling_slope"] > -egt_slope_cr) )
+
+        # Apply engine speed slope criteria to isolate steady-state events.
+        ss_filter = (      (es_rolling_slope < es_slope_cr)
+                         & (es_rolling_slope > -es_slope_cr))
+                         # & (self.math_df["egt_rolling_slope"] < egt_slope_cr)
+                         # & (self.math_df["egt_rolling_slope"] > -egt_slope_cr) )
         # egt_slope_cr and es_slope_cr are abs value so have to apply on high
         # and low end.
+
+
+        # # Apply engine speed and EGT slope criteria to isolate steady-state events.
+        # ss_filter = (      (self.math_df["es_rolling_slope"] < es_slope_cr)
+        #                  & (self.math_df["es_rolling_slope"] > -es_slope_cr)
+        #                  & (self.math_df["egt_rolling_slope"] < egt_slope_cr)
+        #                  & (self.math_df["egt_rolling_slope"] > -egt_slope_cr) )
+        # egt_slope_cr and es_slope_cr are abs value so have to apply on high
+        # and low end.
+
+
+        # Mask off every data point not meeting the filter criteria.
+        es_rol_avg_mskd = es_rolling_avg.mask(~ss_filter)
+        es_rslope_mskd = es_rolling_slope.mask(~ss_filter)
+        # Convert to a list of indices.
+        valid_times = es_rol_avg_mskd[~es_rol_avg_mskd.isna()]
+
+        if len(valid_times) == 0:
+            # If no times were stored, then alert user but continue with
+            # program.
+            self.Doc.warn("No valid steady-state events found in run %s.")
+            # self.Doc.warn("No valid steady-state events found in run %s (Criteria: "
+            #     "speed slope >%d mph/s, speed >%d mph, and throttle <%d deg).\n"
+            #                        "Processing will continue without abridging."
+            #             % (self.run_label, gs_slope_cr, gspd_cr, throttle_cr))
+            # # Take care of needed assignments that are typically down below.
+            # self.sync_df["gs_rolling_avg"] = gs_rolling_avg
+            # self.sync_df["gs_rolling_slope"] = gs_rolling_slope
+            # self.sync_df["downhill_filter"] = downhill_filter
+            # self.sync_df["trendlines"] = np.nan
+            # self.sync_df["slopes"] = np.nan
+            # self.abr_df = self.sync_df.copy(deep=True)
+            #
+            # self.meta_str += ("No valid downhill events found in run (Criteria: "
+            # "speed slope >%d mph/s, speed >%d mph, and throttle <%d deg). "
+            # "Data unabridged. | " % (gs_slope_cr, gspd_cr, throttle_cr))
+            # return
+
+        # Identify separate continuous ranges.
+        cont_ranges = [] # ranges w/ continuous data (no NaNs)
+        current_range = [valid_times.index[0]]
+        for i, time in enumerate(valid_times.index[1:]):
+            prev_time = valid_times.index[i] # i is behind by one.
+            if self.raw_df.index.get_loc(time) - self.raw_df.index.get_loc(prev_time) > 1:
+                current_range.append(prev_time)
+                cont_ranges.append(current_range)
+                # Reset range
+                current_range = [time]
+        # Add last value to end of last range
+        current_range.append(time)
+        cont_ranges.append(current_range)
+
+        self.Doc.print("\nSteady-state ranges (before imposing length req.):", True)
+        for event_range in cont_ranges:
+            self.Doc.print("\t%0.2f\t->\t%0.2f"
+                                       % (event_range[0], event_range[1]), True)
+
+        valid_slopes = []
+        for range in cont_ranges:
+            if range[1]-range[0] > time_cr:
+                # Must have > time_cr seconds to count.
+                valid_slopes.append(range)
+            else:
+                # Adjust filter to eliminate these extraneous events.
+                ss_filter[range[0]:range[1]] = False
+
+        if not valid_slopes:
+            # If no times were stored, then alert user but continue with
+            # program.
+            self.Doc.print("No valid steady-state events found in run %s (after imposing length requirement).")
+            # self.Doc.print("\nNo valid downhill events found in run %s "
+            # "(Criteria: speed slope >%d mph/s, speed >%d mph, and throttle <%d "
+            #     "deg for >%ds).\nProcessing will continue without abridging."
+            # % (self.run_label, gs_slope_cr, gspd_cr, throttle_cr, gs_slope_t_cr))
+            # self.meta_str += ("No valid downhill events found in run (Criteria: "
+            # "speed slope >%d mph/s, speed >%d mph, and throttle <%d deg for "
+            # ">%ds). Data unabridged. | "
+            #               % (gs_slope_cr, gspd_cr, throttle_cr, gs_slope_t_cr))
+            #
+            # self.sync_df["gs_rolling_avg"] = gs_rolling_avg
+            # self.sync_df["gs_rolling_slope"] = gs_rolling_slope
+            # self.sync_df["downhill_filter"] = downhill_filter
+            # self.sync_df["trendlines"] = np.nan
+            # self.sync_df["slopes"] = np.nan
+            # self.abr_df = self.sync_df.copy(deep=True)
+            # return
+        # else:
+        #     # Document in output file
+        #     self.meta_str += ("Isolated events where speed slope exceeded %d "
+        #     "mph/s with speed >%d mph and throttle <%d deg for >%ds. "
+        #     "Removed extraneous surrounding events. "
+        #     "These same criteria were used for the downhill calcs. | "
+        #         % (gs_slope_cr, gspd_cr, throttle_cr, gs_slope_t_cr))
+        #
+        # # Document window sizes in metadata string for output file:
+        # self.meta_str += ("Isolation and downhill calc rolling window sizes: "
+        #                                         "%d for avg, %d for slope | "
+        #                                     % (win_size_avg, win_size_slope))
+
+        self.Doc.print("\nSteady-state ranges (after imposing length req.):", True)
+        for valid_range in valid_slopes:
+            self.Doc.print("\t%0.2f\t->\t%0.2f"
+                                       % (valid_range[0], valid_range[1]), True)
+
         self.Doc.print("\nTotal data points that fail steady-state criteria: %d"
-                                                        % sum(~ss_filter), True)
+                                        % sum(~ss_filter), True)
         self.Doc.print("Total data points that meet steady-state criteria: %d"
-                                                         % sum(ss_filter), True)
+                                         % sum(ss_filter), True)
         # https://stackoverflow.com/questions/12765833/counting-the-number-of-true-booleans-in-a-python-list
 
         self.math_df["steady_state"] = ss_filter
+        self.math_df["egt_rolling_avg"] = egt_rolling_avg
+        self.math_df["es_rolling_avg"] = es_rolling_avg
+        self.math_df["egt_rolling_slope"] = egt_rolling_slope
+        self.math_df["es_rolling_slope"] = es_rolling_slope
 
         # "Mask off" by assigning NaN where criteria not met.
         self.math_df["egt_rol_avg_mskd"] = self.math_df["egt_rolling_avg"].mask(
@@ -381,7 +497,7 @@ class SingleRun(object):
 
         plt.ylabel("Engine Speed (rpm)")
 
-        plt.title("Run %s - Steady-state Isolation (Abridged Data)"
+        plt.title("Run %s - Steady-state Isolation"
                                                 % self.run_label, loc="left")
 
         plt.setp(ax1.get_xticklabels(), visible=False)
