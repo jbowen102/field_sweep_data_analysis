@@ -147,7 +147,7 @@ class SingleRun(object):
     def process_data(self):
         """Apply all processing methods to this run."""
         self.read_data()
-        self.add_math_channels()
+        # self.add_math_channels()
 
     def read_data(self):
         """Read in run's data from data_raw directory."""
@@ -438,8 +438,10 @@ class SingleRun(object):
         self.description = description
         self.Doc.print("") # blank line
 
-        self.plot_raw_basic()
-        self.plot_ss_range()
+        self.plot_demo_segments()
+
+        # self.plot_raw_basic()
+        # self.plot_ss_range()
 
         # each of these calls export_plot() and clears fig afterward.
 
@@ -479,6 +481,95 @@ class SingleRun(object):
         self.export_plot("raw_basic")
         plt.clf()
         # https://stackoverflow.com/questions/8213522/when-to-use-cla-clf-or-close-for-clearing-a-plot-in-matplotlib
+
+
+    def plot_demo_segments(self):
+
+        # while True:
+        #     print("\n")
+        #     t1 = int(input("First time:\n> "))
+        #     t2 = int(input("Second time:\n> "))
+
+        segments = [[108, 128], [150, 165], [200, 220],
+                    [305, 325], [364, 388], [245, 265],
+                    [417, 434], [465, 475], [537, 551],
+                    [576, 589], [605, 625], [639, 659],
+                    [676, 696], [734, 764], [777, 807],
+                    [817, 847], [901, 921], [933, 953],
+                    [965, 995], [1049, 1069], [1081, 1102],
+                    [1112, 1126], [1130, 1142]]
+
+        offset = 50 # seconds
+
+        for i, seg in enumerate(segments):
+            self.plot_raw_segment(seg, offset)
+
+
+    def plot_raw_segment(self, times, time_offset):
+
+        # Handle time values too close to start or end of data.
+        # Offset times:
+        offset_time1 = max(times[0] - time_offset, self.raw_df.index[0])
+        offset_time2 = min(times[1] + time_offset, self.raw_df.index[-1])
+
+        self.Doc.print("\nraw_df chosen segment:", True)
+        self.Doc.print(self.raw_df[offset_time1:offset_time2].to_string(
+                        max_rows=10, max_cols=7, show_dimensions=True), True)
+
+        ax1 = plt.subplot(411)
+        plt.plot(self.raw_df.loc[offset_time1:offset_time2].index,
+                 self.raw_df["Engine_RPM"][offset_time1:offset_time2],
+                                        label="Engine Speed", color="tab:orange")
+        plt.plot(self.raw_df.loc[times[0]:times[1]].index,
+                 self.raw_df["Engine_RPM"][times[0]:times[1]],
+                                        label="Engine Speed", color="tab:blue")
+
+        print(self.raw_df["Engine_RPM"][times[0]:times[1]].mean())
+        ax1.set_ylim([max(self.raw_df["Engine_RPM"][times[0]:times[1]].mean() - 700, 0),
+                      min(self.raw_df["Engine_RPM"][times[0]:times[1]].mean() + 700, 8400)])
+        plt.title("Run %s - Raw Data" % self.run_label, loc="left")
+        plt.ylabel("Engine Speed (rpm)")
+
+        plt.setp(ax1.get_xticklabels(), visible=False)
+
+        ax2 = plt.subplot(412, sharex=ax1)
+        plt.plot(self.raw_df.loc[offset_time1:offset_time2].index,
+                 self.raw_df["Throttle_Position"][offset_time1:offset_time2],
+                                        label="Throttle", color="tab:purple")
+        plt.plot(self.raw_df.loc[times[0]:times[1]].index,
+                 self.raw_df["Throttle_Position"][times[0]:times[1]],
+                                        label="Throttle", color="lightgrey")
+        ax2.set_ylim([max(self.raw_df["Throttle_Position"][times[0]:times[1]].mean() - 7, 0),
+                      min(self.raw_df["Throttle_Position"][times[0]:times[1]].mean() + 7, 80)])
+        ax2.set_ylabel("Throttle (deg)")
+
+        plt.setp(ax2.get_xticklabels(), visible=False)
+
+        ax3 = plt.subplot(413, sharex=ax1)
+        plt.plot(self.raw_df.loc[offset_time1:offset_time2].index,
+                 self.raw_df["Exhaust_Temperature"][offset_time1:offset_time2],
+                                    label="Exhaust Temp", color="yellowgreen")
+        plt.plot(self.raw_df.loc[times[0]:times[1]].index,
+                 self.raw_df["Exhaust_Temperature"][times[0]:times[1]],
+                                    label="Exhaust Temp", color="tab:orange")
+        ax3.set_ylabel("Exhaust Temp (C)")
+
+        plt.setp(ax3.get_xticklabels(), visible=False)
+
+        ax4 = plt.subplot(414, sharex=ax1)
+        plt.plot(self.raw_df.loc[offset_time1:offset_time2].index,
+                 self.raw_df["Coolant_Temp"][offset_time1:offset_time2],
+                                        label="Coolant Temp", color="tab:blue")
+        ax4.set_ylabel("Coolant Temp (C)")
+
+        ax4.set_xlabel("Time (s)")
+
+        # plt.show() # can't use w/ WSL.
+        # https://stackoverflow.com/questions/43397162/show-matplotlib-plots-and-other-gui-in-ubuntu-wsl1-wsl2
+        self.export_plot("raw_segment_%ds-%ds" % (times[0], times[1]))
+        plt.clf()
+        # https://stackoverflow.com/questions/8213522/when-to-use-cla-clf-or-close-for-clearing-a-plot-in-matplotlib
+
 
 
     def plot_ss_range(self):
@@ -693,7 +784,7 @@ def main_prog():
     else:
         raise FilenameError("Bad log-dir argument. Must be valid path. "
                                                                     "Aborting.")
-    # test
+
     MyRun = SingleRun(args.auto, args.verbose, args.ignore_warn)
 
     if args.plot and PLOT_LIB_PRESENT:

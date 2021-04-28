@@ -1,4 +1,8 @@
 #!/bin/bash
 
+cd ~/field_sweep_data_analysis
+
 cp /mnt/v/Python3/field_sweep_data_analysis/fsda.py .
 python3 fsda.py -vpao
+
+cd - >> /dev/null
