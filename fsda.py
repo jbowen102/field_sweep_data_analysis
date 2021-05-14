@@ -499,13 +499,17 @@ class SingleRun(object):
                     [965, 995], [1049, 1069], [1081, 1102],
                     [1112, 1126], [1130, 1142]]
 
+        # Create new series that contains NaNs except these ranges.
+        seg_series = pd.Series(np.nan, index=self.raw_df.index)
+        for times in segments:
+            seg_series[times[0]:times[1]] = self.raw_df["Engine_RPM"][times[0]:times[1]].copy()
+
         offset = 50 # seconds
-
         for i, seg in enumerate(segments):
-            self.plot_raw_segment(seg, offset)
+            self.plot_raw_segment(seg, offset, seg_series)
 
 
-    def plot_raw_segment(self, times, time_offset):
+    def plot_raw_segment(self, times, time_offset, seg_series):
 
         # Handle time values too close to start or end of data.
         # Offset times:
@@ -520,13 +524,19 @@ class SingleRun(object):
         plt.plot(self.raw_df.loc[offset_time1:offset_time2].index,
                  self.raw_df["Engine_RPM"][offset_time1:offset_time2],
                                         label="Engine Speed", color="tab:orange")
-        plt.plot(self.raw_df.loc[times[0]:times[1]].index,
-                 self.raw_df["Engine_RPM"][times[0]:times[1]],
+
+        plt.plot(seg_series.loc[offset_time1:offset_time2].index,
+                 seg_series[offset_time1:offset_time2],
                                         label="Engine Speed", color="tab:blue")
 
         print(self.raw_df["Engine_RPM"][times[0]:times[1]].mean())
+
+        ax1.set_yticks(np.linspace(3800,8000,22))
         ax1.set_ylim([max(self.raw_df["Engine_RPM"][times[0]:times[1]].mean() - 700, 0),
                       min(self.raw_df["Engine_RPM"][times[0]:times[1]].mean() + 700, 8400)])
+        plt.grid(axis="y", which="major")
+        # https://www.delftstack.com/howto/matplotlib/set-matplotlib-grid-interval/
+
         plt.title("Run %s - Raw Data" % self.run_label, loc="left")
         plt.ylabel("Engine Speed (rpm)")
 
