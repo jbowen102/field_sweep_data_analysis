@@ -500,16 +500,22 @@ class SingleRun(object):
                     [1112, 1126], [1130, 1142]]
 
         # Create new series that contains NaNs except these ranges.
-        seg_series = pd.Series(np.nan, index=self.raw_df.index)
+        self.seg_series = pd.Series(np.nan, index=self.raw_df.index)
         for times in segments:
-            seg_series[times[0]:times[1]] = self.raw_df["Engine_RPM"][times[0]:times[1]].copy()
+            self.seg_series[times[0]:times[1]] = self.raw_df["Engine_RPM"][times[0]:times[1]].copy()
+
+        # Create new series for rolling average
+        es_win_size_avg = 8001  # window size for engine speed rolling avg.
+        self.es_rolling_avg = self.raw_df.rolling(
+            window=es_win_size_avg, center=True)["Engine_RPM"].mean()
+        # https://stackoverflow.com/questions/38055632/left-align-a-pandas-rolling-object
 
         offset = 50 # seconds
         for i, seg in enumerate(segments):
-            self.plot_raw_segment(seg, offset, seg_series)
+            self.plot_segment(seg, offset)
 
 
-    def plot_raw_segment(self, times, time_offset, seg_series):
+    def plot_segment(self, times, time_offset):
 
         # Handle time values too close to start or end of data.
         # Offset times:
@@ -523,11 +529,14 @@ class SingleRun(object):
         ax1 = plt.subplot(411)
         plt.plot(self.raw_df.loc[offset_time1:offset_time2].index,
                  self.raw_df["Engine_RPM"][offset_time1:offset_time2],
-                                        label="Engine Speed", color="tab:orange")
-
-        plt.plot(seg_series.loc[offset_time1:offset_time2].index,
-                 seg_series[offset_time1:offset_time2],
+                                        label="Engine Speed", color="tab:orange", alpha=0.6)
+        plt.plot(self.seg_series.loc[offset_time1:offset_time2].index,
+                 self.seg_series[offset_time1:offset_time2],
                                         label="Engine Speed", color="tab:blue")
+        plt.plot(self.es_rolling_avg.loc[offset_time1:offset_time2].index,
+                 self.es_rolling_avg[offset_time1:offset_time2],
+                                        label="Engine Speed", color="yellowgreen")
+
 
         print(self.raw_df["Engine_RPM"][times[0]:times[1]].mean())
 
@@ -576,7 +585,7 @@ class SingleRun(object):
 
         # plt.show() # can't use w/ WSL.
         # https://stackoverflow.com/questions/43397162/show-matplotlib-plots-and-other-gui-in-ubuntu-wsl1-wsl2
-        self.export_plot("raw_segment_%ds-%ds" % (times[0], times[1]))
+        self.export_plot("segment_%ss-%ss" % (str(times[0]).zfill(4), str(times[1]).zfill(4)))
         plt.clf()
         # https://stackoverflow.com/questions/8213522/when-to-use-cla-clf-or-close-for-clearing-a-plot-in-matplotlib
 
