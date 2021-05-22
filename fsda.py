@@ -89,7 +89,7 @@ class SingleRun(object):
         # Hard-coded list of target engine speeds for which to extract steady-
         # state averages, and tolerance value.
         self.target_speeds = list(range(3800,8200,200)) # 3800-8000 rpm
-        self.speed_tol = 100 # rpm
+        self.speed_tol = 50 # rpm
         self.min_seg_length = 10 # seconds
 
         if auto_find:
@@ -540,7 +540,7 @@ class SingleRun(object):
         self.description = description
         self.Doc.print("") # blank line
 
-        # self.plot_demo_segments()
+        self.plot_demo_segments()
 
         # self.plot_raw_basic()
         # self.plot_ss_range()
@@ -606,11 +606,10 @@ class SingleRun(object):
         for times in segments:
             self.seg_series[times[0]:times[1]] = self.raw_df["Engine_RPM"][times[0]:times[1]].copy()
 
-        # Create new series for rolling average
-        es_win_size_avg = 5001  # window size for engine speed rolling avg.
-        self.es_rolling_avg = self.raw_df.rolling(
-            window=es_win_size_avg, center=True)["Engine_RPM"].mean()
-        # https://stackoverflow.com/questions/38055632/left-align-a-pandas-rolling-object
+        # # Create new series for rolling average
+        # es_win_size_avg = 5001  # window size for engine speed rolling avg.
+        # self.es_rolling_avg = self.raw_df.rolling(
+        #     window=es_win_size_avg, center=True)["Engine_RPM"].mean()
 
         offset = 50 # seconds to show before and after target range for context.
         for i, seg in enumerate(segments):
@@ -624,23 +623,28 @@ class SingleRun(object):
         offset_time1 = max(times[0] - time_offset, self.raw_df.index[0])
         offset_time2 = min(times[1] + time_offset, self.raw_df.index[-1])
 
-        self.Doc.print("\nraw_df chosen segment:", True)
-        self.Doc.print(self.raw_df[offset_time1:offset_time2].to_string(
-                        max_rows=10, max_cols=7, show_dimensions=True), True)
+        # self.Doc.print("\nraw_df chosen segment:", True)
+        # self.Doc.print(self.raw_df[offset_time1:offset_time2].to_string(
+        #                 max_rows=10, max_cols=7, show_dimensions=True), True)
 
         ax1 = plt.subplot(211)
         plt.plot(self.raw_df.loc[offset_time1:offset_time2].index,
                  self.raw_df["Engine_RPM"][offset_time1:offset_time2],
-                                        label="Engine Speed", color="tab:orange", alpha=0.6)
+                            label="Engine Speed", color="tab:orange", alpha=0.6)
         plt.plot(self.seg_series.loc[offset_time1:offset_time2].index,
                  self.seg_series[offset_time1:offset_time2],
                                         label="Engine Speed", color="tab:blue")
-        plt.plot(self.es_rolling_avg.loc[offset_time1:offset_time2].index,
-                 self.es_rolling_avg[offset_time1:offset_time2],
-                                        label="Engine Speed", color="yellowgreen")
+        plt.plot(self.math_df["es_rolling_avg"].loc[offset_time1:offset_time2].index,
+                 self.math_df["es_rolling_avg"][offset_time1:offset_time2],
+                                    label="Engine Speed", color="yellowgreen")
+        # Plot program-identified segments for comparison.
+        prog_segments = self.math_df["es_rolling_avg"].mask(
+                                    ~self.math_df["combined_segment_filter"])
+        plt.plot(prog_segments.loc[offset_time1:offset_time2].index,
+                 prog_segments[offset_time1:offset_time2],
+                                    label="Engine Speed", color="tab:purple")
 
-
-        print(self.raw_df["Engine_RPM"][times[0]:times[1]].mean())
+        # self.Doc.print(self.raw_df["Engine_RPM"][times[0]:times[1]].mean(), True)
 
         ax1.set_yticks(np.linspace(3800,8000,22))
         ax1.set_ylim([max(self.raw_df["Engine_RPM"][times[0]:times[1]].mean() - 700, 0),
