@@ -282,6 +282,7 @@ class SingleRun(object):
                                                         "\t%s    ->\t%s"
                                 % (target_speed, "{:7.2f}".format(seg_range[0]),
                                                 "{:7.2f}".format(seg_range[1])))
+                        # https://appdividend.com/2021/03/31/how-to-format-float-values-in-python/
                         # Create generic filter to apply to any series in DF.
                         # This array can be used with Series.where() method
                         selected_seg_filter_array = (
@@ -293,7 +294,8 @@ class SingleRun(object):
                         selected_seg_filter = pd.Series(
                                                     selected_seg_filter_array,
                                                     index=self.math_df.index)
-
+                        # To create list of valid indices for segment:
+                        # self.raw_df.index[selected_seg_filter]
                         # Store for later.
                         self.seg_dict[target_speed] = selected_seg_filter
 
@@ -308,10 +310,20 @@ class SingleRun(object):
             # speed target without truncating backward_index.
             if not found:
                 # Alert user no segment was found for given target speed.
-                self.Doc.warn("No segment longer than %d found for target "
+                self.Doc.warn("No segment longer than %ds found for target "
                             "speed %d." % (self.min_seg_length, target_speed))
+                # Get rid of entry so it doesn't cause trouble later
+                self.seg_dict.pop(target_speed)
 
         self.Doc.print("...done")
+
+        # Create series with union of all segment filters.
+        combined_segment_filter = False
+        for key in self.seg_dict:
+            combined_segment_filter = combined_segment_filter | self.seg_dict[key]
+
+        self.math_df["combined_segment_filter"] = combined_segment_filter
+
 
     def add_ss_avgs_reg(self):
         """Identify steady-state regions of data and calculate average vals."""
@@ -915,5 +927,5 @@ if __name__ == "__main__":
     main_prog()
 
 
-# test
+# # test
 # MyRun = SingleRun(True, True, False)
