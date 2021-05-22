@@ -86,6 +86,12 @@ class SingleRun(object):
         # Create a new object to store and print output info
         self.Doc = Output(verbose, warn_prompt)
 
+        # Hard-coded list of target engine speeds for which to extract steady-
+        # state averages, and tolerance value.
+        self.target_speeds = list(range(3800,8200,200)) # 3800-8000 rpm
+        self.speed_tol = 100 # rpm
+        self.min_seg_length = 10 # seconds
+
         if auto_find:
             self.input_path = self.find_run()
         else:
@@ -147,7 +153,7 @@ class SingleRun(object):
     def process_data(self):
         """Apply all processing methods to this run."""
         self.read_data()
-        # self.add_math_channels()
+        self.add_math_channels()
 
     def read_data(self):
         """Read in run's data from data_raw directory."""
@@ -221,9 +227,93 @@ class SingleRun(object):
         # https://stackoverflow.com/questions/18176933/create-an-empty-data-frame-with-index-from-another-data-frame
 
         self.add_ss_avgs()
+        # self.add_ss_avgs_reg()
 
 
     def add_ss_avgs(self):
+        """Identify steady-state regions of data and calculate average vals."""
+
+        # Create new series for rolling average
+        es_win_size_avg = 5001  # window size for engine speed rolling avg.
+        es_rolling_avg = self.raw_df.rolling(window=es_win_size_avg,
+                                            center=True)["Engine_RPM"].mean()
+        # https://stackoverflow.com/questions/38055632/left-align-a-pandas-rolling-object
+        self.math_df["es_rolling_avg"] = es_rolling_avg
+
+        # Create dict for filtered segments. Will store individual series.
+        self.seg_dict = dict.fromkeys(self.target_speeds)
+
+        self.Doc.print("\nFinding segments for each target speed...")
+        # Start with highest speed and work through list backwards.
+        backward_index = self.math_df.index[::-1]
+        for target_speed in reversed(self.target_speeds):
+            # Define filter for speed values in tolerance window
+            speed_filter = (  (es_rolling_avg >= (target_speed - self.speed_tol))
+                            & (es_rolling_avg < (target_speed + self.speed_tol)) )
+            # Mask off every data point not meeting the filter criterion.
+            # Using rolling average to create the filter, and it is applied to raw speed channel.
+            masked_speed = self.raw_df["Engine_RPM"].mask(~speed_filter)
+
+            # Iterate through backwards to find latest continuous section meeting length criterion
+            seg_range = [0, 0]
+            counting = False
+            found = False
+            for t in backward_index:
+                # Any values found (not NaN) are part of a candidate segment
+                # Check the length of each segment found. Keep first one that
+                # meets min-length criterion.
+                if ~np.isnan(masked_speed[t]):
+                    if not counting:
+                        # first value of potential valid segment. Start counting
+                        seg_range[1] = t
+                        counting = True
+                    # If already counting, just keep looping
+                elif counting:
+                    # just left tolerance window. See if segment met length criterion
+                    counting = False
+                    seg_range[0] = prev_t
+                    if seg_range[1] - seg_range[0] >= self.min_seg_length:
+                        # First one found is all that's needed.
+                        found = True
+                        # self.Doc.print("\tSegment for %4d rpm:"
+                        #                                 "\t%4.2f\t->\t%4.2f"
+                        #         % (target_speed, seg_range[0], seg_range[1]))
+                        self.Doc.print("\tSegment for %4d rpm:"
+                                                        "\t%s    ->\t%s"
+                                % (target_speed, "{:7.2f}".format(seg_range[0]),
+                                                "{:7.2f}".format(seg_range[1])))
+                        # Create generic filter to apply to any series in DF.
+                        # This array can be used with Series.where() method
+                        selected_seg_filter_array = (
+                                          (self.math_df.index >= seg_range[0])
+                                        & (self.math_df.index <= seg_range[1]) )
+                        # To create list of valid indices for segment:
+                        # self.raw_df.index[~self.raw_df.index.where(selected_seg_filter_array).isna()]
+                        # Alternate series version that can be used w/ mask():
+                        selected_seg_filter = pd.Series(
+                                                    selected_seg_filter_array,
+                                                    index=self.math_df.index)
+
+                        # Store for later.
+                        self.seg_dict[target_speed] = selected_seg_filter
+
+                        # Search for next segment should begin where this left off.
+                        # Truncate backward_index.
+                        backward_index = backward_index[backward_index.get_loc(t):]
+                        break # out of inner loop to search for next target speed.
+                    # If it's not long enough, keep looking
+                prev_t = t
+
+            # If no segment found for a given speed target, continue on to next
+            # speed target without truncating backward_index.
+            if not found:
+                # Alert user no segment was found for given target speed.
+                self.Doc.warn("No segment longer than %d found for target "
+                            "speed %d." % (self.min_seg_length, target_speed))
+
+        self.Doc.print("...done")
+
+    def add_ss_avgs_reg(self):
         """Identify steady-state regions of data and calculate average vals."""
         es_win_size_avg = 5001  # window size for engine speed rolling avg.
         es_win_size_slope = 201 # win size for rolling slope of engine speed rolling avg.
@@ -438,7 +528,7 @@ class SingleRun(object):
         self.description = description
         self.Doc.print("") # blank line
 
-        self.plot_demo_segments()
+        # self.plot_demo_segments()
 
         # self.plot_raw_basic()
         # self.plot_ss_range()
@@ -505,12 +595,12 @@ class SingleRun(object):
             self.seg_series[times[0]:times[1]] = self.raw_df["Engine_RPM"][times[0]:times[1]].copy()
 
         # Create new series for rolling average
-        es_win_size_avg = 8001  # window size for engine speed rolling avg.
+        es_win_size_avg = 5001  # window size for engine speed rolling avg.
         self.es_rolling_avg = self.raw_df.rolling(
             window=es_win_size_avg, center=True)["Engine_RPM"].mean()
         # https://stackoverflow.com/questions/38055632/left-align-a-pandas-rolling-object
 
-        offset = 50 # seconds
+        offset = 50 # seconds to show before and after target range for context.
         for i, seg in enumerate(segments):
             self.plot_segment(seg, offset)
 
@@ -526,7 +616,7 @@ class SingleRun(object):
         self.Doc.print(self.raw_df[offset_time1:offset_time2].to_string(
                         max_rows=10, max_cols=7, show_dimensions=True), True)
 
-        ax1 = plt.subplot(411)
+        ax1 = plt.subplot(211)
         plt.plot(self.raw_df.loc[offset_time1:offset_time2].index,
                  self.raw_df["Engine_RPM"][offset_time1:offset_time2],
                                         label="Engine Speed", color="tab:orange", alpha=0.6)
@@ -551,7 +641,7 @@ class SingleRun(object):
 
         plt.setp(ax1.get_xticklabels(), visible=False)
 
-        ax2 = plt.subplot(412, sharex=ax1)
+        ax2 = plt.subplot(212, sharex=ax1)
         plt.plot(self.raw_df.loc[offset_time1:offset_time2].index,
                  self.raw_df["Throttle_Position"][offset_time1:offset_time2],
                                         label="Throttle", color="tab:purple")
@@ -562,26 +652,26 @@ class SingleRun(object):
                       min(self.raw_df["Throttle_Position"][times[0]:times[1]].mean() + 7, 80)])
         ax2.set_ylabel("Throttle (deg)")
 
-        plt.setp(ax2.get_xticklabels(), visible=False)
+        # plt.setp(ax2.get_xticklabels(), visible=False)
+        #
+        # ax3 = plt.subplot(413, sharex=ax1)
+        # plt.plot(self.raw_df.loc[offset_time1:offset_time2].index,
+        #          self.raw_df["Exhaust_Temperature"][offset_time1:offset_time2],
+        #                             label="Exhaust Temp", color="yellowgreen")
+        # plt.plot(self.raw_df.loc[times[0]:times[1]].index,
+        #          self.raw_df["Exhaust_Temperature"][times[0]:times[1]],
+        #                             label="Exhaust Temp", color="tab:orange")
+        # ax3.set_ylabel("Exhaust Temp (C)")
+        #
+        # plt.setp(ax3.get_xticklabels(), visible=False)
+        #
+        # ax4 = plt.subplot(414, sharex=ax1)
+        # plt.plot(self.raw_df.loc[offset_time1:offset_time2].index,
+        #          self.raw_df["Coolant_Temp"][offset_time1:offset_time2],
+        #                                 label="Coolant Temp", color="tab:blue")
+        # ax4.set_ylabel("Coolant Temp (C)")
 
-        ax3 = plt.subplot(413, sharex=ax1)
-        plt.plot(self.raw_df.loc[offset_time1:offset_time2].index,
-                 self.raw_df["Exhaust_Temperature"][offset_time1:offset_time2],
-                                    label="Exhaust Temp", color="yellowgreen")
-        plt.plot(self.raw_df.loc[times[0]:times[1]].index,
-                 self.raw_df["Exhaust_Temperature"][times[0]:times[1]],
-                                    label="Exhaust Temp", color="tab:orange")
-        ax3.set_ylabel("Exhaust Temp (C)")
-
-        plt.setp(ax3.get_xticklabels(), visible=False)
-
-        ax4 = plt.subplot(414, sharex=ax1)
-        plt.plot(self.raw_df.loc[offset_time1:offset_time2].index,
-                 self.raw_df["Coolant_Temp"][offset_time1:offset_time2],
-                                        label="Coolant Temp", color="tab:blue")
-        ax4.set_ylabel("Coolant Temp (C)")
-
-        ax4.set_xlabel("Time (s)")
+        ax2.set_xlabel("Time (s)")
 
         # plt.show() # can't use w/ WSL.
         # https://stackoverflow.com/questions/43397162/show-matplotlib-plots-and-other-gui-in-ubuntu-wsl1-wsl2
@@ -823,3 +913,7 @@ def main_prog():
 
 if __name__ == "__main__":
     main_prog()
+
+
+# test
+# MyRun = SingleRun(True, True, False)
