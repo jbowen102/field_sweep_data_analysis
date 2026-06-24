@@ -1,7 +1,33 @@
-~*
+.~*
 __pycache__/
-*.pyc
+*.py[cod]
 *.out
+.ipynb_checkpoints
+.databricks
+
+.editorconfig
+.vscode
+*.code-workspace
+
+build/
+dist/
+*.egg-info/
+
+# Ignore any file/dir/symlink starting w/ these names:
+TEST*
+import*
+export*
+reference*
+img*
+
+# Experimental/test scripts
+*_TEST.py
+*_TEMP.py
+*_TEMP.ipynb
+
+########################################
+
+# Project-specific
 /data_raw
 /data_buffer
 /data_out
